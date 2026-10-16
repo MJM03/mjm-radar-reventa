@@ -65,8 +65,8 @@ function renderWinners(){
 const PAGE_SIZE=24;let page=1;let filtered=[];
 function getFiltered(){
   const q=document.getElementById('search').value.trim().toLowerCase();
-  const cat=document.getElementById('category').value;const max=+document.getElementById('max').value;const sort=document.getElementById('catalogSort').value;const risk=document.getElementById('risk').value;
-  const list=catalog.filter(p=>p.min<=max&&(!cat||p.category===cat)&&(!risk||riskInfo(p,false,p.stores.length).level===risk)&&(!q||(p.name+' '+p.brand+' '+p.code+' '+p.family).toLowerCase().includes(q)));
+  const store=document.getElementById('store').value;const cat=document.getElementById('category').value;const max=+document.getElementById('max').value;const sort=document.getElementById('catalogSort').value;const risk=document.getElementById('risk').value;
+  const list=catalog.filter(p=>p.min<=max&&(!store||p.stores.some(r=>r.shopcode===store))&&(!cat||p.category===cat)&&(!risk||riskInfo(p,false,p.stores.length).level===risk)&&(!q||(p.name+' '+p.brand+' '+p.code+' '+p.family).toLowerCase().includes(q)));
   return list.sort((a,b)=>sort==='risk'?levelRank[riskInfo(b,false,b.stores.length).level]-levelRank[riskInfo(a,false,a.stores.length).level]:sort==='cheap'?a.min-b.min:sort==='stock'?b.stock-a.stock:sort==='az'?a.name.localeCompare(b.name,'es'):((1-b.min/b.regular)-(1-a.min/a.regular)));
 }
 function renderCatalog(reset=false){
@@ -79,7 +79,9 @@ function renderCatalog(reset=false){
 }
 const categories=[...new Set(catalog.map(p=>p.category))].sort((a,b)=>a.localeCompare(b,'es'));
 document.getElementById('category').innerHTML+=categories.map(c=>`<option value="${safe(c)}">${safe(c)}</option>`).join('');
+const stores=[...new Map(rows.map(r=>[r.shopcode,{code:r.shopcode,name:r.store}])).values()].sort((a,b)=>a.name.localeCompare(b.name,'es')||a.code.localeCompare(b.code,'es'));
+document.getElementById('store').innerHTML+=stores.map(s=>`<option value="${safe(s.code)}">${safe(s.name)} (${safe(s.code)})</option>`).join('');
 document.getElementById('winnerSearch').addEventListener('input',renderWinners);document.getElementById('winnerSort').addEventListener('change',renderWinners);
-['search','category','max','risk','catalogSort'].forEach(id=>document.getElementById(id).addEventListener(id==='search'?'input':'change',()=>renderCatalog(true)));
+['search','store','category','max','risk','catalogSort'].forEach(id=>document.getElementById(id).addEventListener(id==='search'?'input':'change',()=>renderCatalog(true)));
 document.getElementById('prev').addEventListener('click',()=>{if(page>1){page--;renderCatalog();document.getElementById('catalogo').scrollIntoView()}});document.getElementById('next').addEventListener('click',()=>{if(page*PAGE_SIZE<filtered.length){page++;renderCatalog();document.getElementById('catalogo').scrollIntoView()}});
 renderWinners();renderCatalog(true);
