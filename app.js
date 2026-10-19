@@ -113,10 +113,26 @@ function parseCSV(text){
 }
 async function matrixFromFile(file){
   if(/\.csv$/i.test(file.name)||file.type==='text/csv')return parseCSV(await file.text());
-  if(typeof XLSX==='undefined')throw new Error('No se pudo cargar el lector de Excel. Intenta nuevamente o exporta el archivo como CSV.');
-  const workbook=XLSX.read(await file.arrayBuffer(),{type:'array'});let best=null;
-  for(const sheetName of workbook.SheetNames){const matrix=XLSX.utils.sheet_to_json(workbook.Sheets[sheetName],{header:1,defval:'',raw:true});try{const detected=detectTable(matrix);if(!best||detected.score>best.score)best={matrix,score:detected.score,sheetName}}catch{}}
+  if(/\.xls$/i.test(file.name)&&!/\.xlsx$/i.test(file.name))throw new Error('El formato .xls antiguo no es compatible. Guárdalo como .xlsx o expórtalo como CSV.');
+  const matrices=await matricesFromXlsx(await file.arrayBuffer());let best=null;
+  for(const matrix of matrices){try{const detected=detectTable(matrix);if(!best||detected.score>best.score)best={matrix,score:detected.score}}catch{}}
   if(!best)throw new Error('No encontré una hoja con columnas de código/SKU y producto/descripción.');return best.matrix;
+}
+async function unzipXlsx(buffer){
+  const bytes=new Uint8Array(buffer),view=new DataView(buffer);let eocd=-1;
+  for(let i=bytes.length-22;i>=Math.max(0,bytes.length-65557);i--)if(view.getUint32(i,true)===0x06054b50){eocd=i;break}
+  if(eocd<0)throw new Error('El archivo Excel no es un .xlsx válido.');const count=view.getUint16(eocd+10,true);let offset=view.getUint32(eocd+16,true);const files=new Map();
+  for(let n=0;n<count;n++){if(view.getUint32(offset,true)!==0x02014b50)break;const method=view.getUint16(offset+10,true),size=view.getUint32(offset+20,true),nameLength=view.getUint16(offset+28,true),extraLength=view.getUint16(offset+30,true),commentLength=view.getUint16(offset+32,true),localOffset=view.getUint32(offset+42,true);const name=new TextDecoder().decode(bytes.slice(offset+46,offset+46+nameLength));const localNameLength=view.getUint16(localOffset+26,true),localExtraLength=view.getUint16(localOffset+28,true),start=localOffset+30+localNameLength+localExtraLength;let data=bytes.slice(start,start+size);
+    if(method===8){if(typeof DecompressionStream==='undefined')throw new Error('Este navegador no puede abrir Excel. Exporta el archivo como CSV.');const stream=new Blob([data]).stream().pipeThrough(new DecompressionStream('deflate-raw'));data=new Uint8Array(await new Response(stream).arrayBuffer())}else if(method!==0)throw new Error('El Excel usa una compresión no compatible. Expórtalo como CSV.');files.set(name,data);offset+=46+nameLength+extraLength+commentLength}
+  return files;
+}
+const xmlText=bytes=>new TextDecoder('utf-8').decode(bytes);
+const columnNumber=reference=>{let number=0;for(const ch of reference.match(/[A-Z]+/i)?.[0]||'')number=number*26+ch.toUpperCase().charCodeAt(0)-64;return number-1};
+async function matricesFromXlsx(buffer){
+  const files=await unzipXlsx(buffer);const parser=new DOMParser();let shared=[];
+  if(files.has('xl/sharedStrings.xml')){const xml=parser.parseFromString(xmlText(files.get('xl/sharedStrings.xml')),'application/xml');shared=[...xml.getElementsByTagName('si')].map(si=>[...si.getElementsByTagName('t')].map(t=>t.textContent||'').join(''))}
+  const sheetNames=[...files.keys()].filter(name=>/^xl\/worksheets\/sheet\d+\.xml$/.test(name)).sort((a,b)=>a.localeCompare(b,undefined,{numeric:true}));
+  return sheetNames.map(name=>{const xml=parser.parseFromString(xmlText(files.get(name)),'application/xml');const matrix=[];for(const cell of xml.getElementsByTagName('c')){const reference=cell.getAttribute('r')||'';const rowNumber=(Number(reference.match(/\d+/)?.[0])||1)-1,column=columnNumber(reference);if(column<0)continue;while(matrix.length<=rowNumber)matrix.push([]);const type=cell.getAttribute('t');let value='';if(type==='inlineStr')value=[...cell.getElementsByTagName('t')].map(t=>t.textContent||'').join('');else{const raw=cell.getElementsByTagName('v')[0]?.textContent??'';value=type==='s'?(shared[Number(raw)]??''):type==='b'?(raw==='1'):type==='str'?raw:(raw!==''&&Number.isFinite(Number(raw))?Number(raw):raw)}matrix[rowNumber][column]=value}return matrix});
 }
 function setImportStatus(message,type=''){const node=document.getElementById('importStatus');node.textContent=message;node.className='import-status '+type}
 function populateFilters(){
